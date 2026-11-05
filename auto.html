@@ -225,7 +225,7 @@ const CAL={g:null,e1:null,e2:null,sumRot:[0,0],sumRef:[0,0],norm:0,n:0,mode:0,ph
 function v3(a){return [a.x,a.y,a.z];}
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const nrm=a=>{const l=Math.hypot(...a)||1;return a.map(x=>x/l);};
-function resetCal(gv){CAL.g=gv?nrm(gv):null;CAL.sumRot=[0,0];CAL.sumRef=[0,0];CAL.norm=0;CAL.n=0;CAL.ok=false;CAL.conf=0;
+function resetCal(gv){CAL.resets=(CAL.resets||0)+1;CAL.g=gv?nrm(gv):null;CAL.sumRot=[0,0];CAL.sumRef=[0,0];CAL.norm=0;CAL.n=0;CAL.ok=false;CAL.conf=0;
   if(CAL.g){const ax=[[1,0,0],[0,1,0],[0,0,1]].sort((p,q)=>Math.abs(dot(p,CAL.g))-Math.abs(dot(q,CAL.g)))[0];CAL.e1=nrm(cross(CAL.g,ax));CAL.e2=cross(CAL.g,CAL.e1);}}
 let gLP=null; // low-pass gravity (fallback)
 let hAcc=[0,0], hCnt=0;   // horizontal accel accumulator between GPS fixes
@@ -233,19 +233,40 @@ let fused={lon:0,lat:0,src:"–"}, smooth={lon:0,lat:0};
 let fAcc=[0,0,0];
 let lastMotionT=0, motionRate=0, motionCount=0;
 
+// Gravity is estimated with a slow filter (tau 4 s) on the raw accelerometer, so braking/cornering
+// barely tilt it. A mount change is declared only after a large, sustained deviation while the car
+// is NOT accelerating according to GPS (or is stopped).
+let gSlow=null, gT=0, devSince=0, gpsCalm=true, firstT=0, fastUntil=0;
+function loadSavedCal(){try{return JSON.parse(localStorage.getItem("autoCal")||"null");}catch(e){return null;}}
+function saveCal(){if(!CAL.ok)return;try{localStorage.setItem("autoCal",JSON.stringify({g:CAL.g,e1:CAL.e1,e2:CAL.e2,phi:CAL.phi,mode:CAL.mode,conf:CAL.conf}));}catch(e){}}
 function processMotion(t,aig,alin){
   motionCount++;
-  let gv,lin;
-  if(alin&&alin.x!=null&&aig&&aig.x!=null){lin=v3(alin);gv=[aig.x-alin.x,aig.y-alin.y,aig.z-alin.z];}
-  else if(aig&&aig.x!=null){const a=v3(aig);gLP=gLP?gLP.map((g,i)=>g+0.02*(a[i]-g)):a;gv=gLP;lin=a.map((x,i)=>x-gLP[i]);}
-  else return;
-  const gn=nrm(gv);
-  if(!CAL.g)resetCal(gn);
-  else if(dot(gn,CAL.g)<Math.cos(rad(20))){resetCal(gn);toast("Telefono spostato: ricalibro");}
-  else{CAL.g=nrm(CAL.g.map((x,i)=>x*0.999+gn[i]*0.001));}
-  // horizontal component in basis
-  const hz=lin.map((x,i)=>x-dot(lin,CAL.g)*CAL.g[i]);
+  let a;
+  if(aig&&aig.x!=null)a=v3(aig);
+  else if(alin&&alin.x!=null){ // device without gravity-including data: horizontal only, gravity unknown
+    a=v3(alin); if(!gSlow)return; a=a.map((x,i)=>x+gSlow[i]);
+  } else return;
+  if(a.some(x=>!isFinite(x)))return;
+  const dt=gT?clamp((t-gT)/1000,0.001,0.5):0.02; gT=t;
+  if(!gSlow){gSlow=a.slice();firstT=t;}
+  else{const k=dt/((t<fastUntil?0.4:4)+dt);gSlow=gSlow.map((g,i)=>g+k*(a[i]-g));}
+  const gn=nrm(gSlow);
+  if(!CAL.g){
+    if(t-firstT<1500)return;               // let the filter settle
+    const sv=loadSavedCal();
+    if(sv&&sv.g&&dot(gn,sv.g)>Math.cos(rad(12))){Object.assign(CAL,{g:sv.g,e1:sv.e1,e2:sv.e2,phi:sv.phi,mode:sv.mode,conf:sv.conf,ok:true,n:12,sumRot:[0,0],sumRef:[0,0],norm:0});toast("Calibrazione precedente riutilizzata",1800);}
+    else resetCal(gn);
+  } else {
+    const ang=deg(Math.acos(clamp(dot(gn,CAL.g),-1,1)));
+    if(ang>25&&gpsCalm){devSince=devSince||t;
+      if(t-devSince>3000){resetCal(null);fastUntil=t+2500;firstT=t+2500;devSince=0;try{localStorage.removeItem("autoCal");}catch(e){}toast("Supporto spostato: ricalibro");return;}}
+    else{devSince=0;if(ang<8&&gpsCalm)CAL.g=nrm(CAL.g.map((x,i)=>x*0.9995+gn[i]*0.0005));}
+  }
+  // horizontal (vehicle-plane) component of the raw signal: gravity drops out by projection
+  const along=dot(a,CAL.g);
+  const hz=a.map((x,i)=>x-along*CAL.g[i]);
   const h1=dot(hz,CAL.e1)/G, h2=dot(hz,CAL.e2)/G;
+  if(!isFinite(h1)||!isFinite(h2))return;
   hAcc[0]+=h1;hAcc[1]+=h2;hCnt++;
   if(CAL.ok){
     const c=Math.cos(CAL.phi), s=Math.sin(CAL.phi), y=CAL.mode? -h2: h2;
@@ -271,6 +292,7 @@ function calibrateStep(gLon,gLat,v){
   CAL.phi=Math.atan2(s[1],s[0]); CAL.conf=Math.max(rR,rF)/CAL.norm;
   const was=CAL.ok; CAL.ok=CAL.n>=12&&CAL.conf>0.55;
   if(CAL.ok&&!was)toast("✓ Orientamento calibrato",1800);
+  if(CAL.ok&&CAL.n%10===0)saveCal();
 }
 
 /* ================= trip model ================= */
@@ -307,6 +329,7 @@ function processFix(f){ // f:{t,lat,lon,alt,acc,v,hdg}
   if(p){const dt=(f.t-p.t)/1000;if(dt>0&&dt<5){gLon=(f.v-p.v)/dt/G;
     if(f.v>3&&p.v>3&&f.hdg!=null&&p.hdg!=null){gLat=((f.v+p.v)/2)*rad(wrap180(f.hdg-p.hdg))/dt/G;}}}
   gLon=clamp(gLon,-1.2,1.2);gLat=clamp(gLat,-1.2,1.2);
+  gpsCalm=f.v<0.8||Math.hypot(gLon,gLat)<0.1;
   calibrateStep(gLon,gLat,f.v);
   if(!CAL.ok){fused={lon:gLon,lat:gLat,src:"gps"};onDynamics(f.t,gLon,gLat);}
   const aL=fAcc[2]>3?fAcc[0]/fAcc[2]:fused.lon, aT=fAcc[2]>3?fAcc[1]/fAcc[2]:fused.lat; fAcc=[0,0,0];
@@ -435,7 +458,7 @@ $("bTrip").onclick=()=>trip?endTrip():startTrip();
 async function requestWake(){try{wakeLock=await navigator.wakeLock.request("screen");wakeLock.addEventListener("release",()=>{wakeLock=null;status();});status();}catch(e){}}
 $("bWake").onclick=requestWake;
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&sensorsOn&&!wakeLock)requestWake();if(document.visibilityState==="hidden"&&trip)putTrip(pack(trip));});
-$("bRecal").onclick=()=>{resetCal(null);toast("Calibrazione azzerata");};
+$("bRecal").onclick=()=>{resetCal(null);gSlow=null;try{localStorage.removeItem("autoCal");}catch(e){}toast("Calibrazione azzerata");};
 setInterval(()=>{if(trip)putTrip(pack(trip));},15000);
 
 /* ================= simulation ================= */
@@ -444,12 +467,12 @@ $("bDemo").onclick=()=>{if(SIM.on){SIM.on=false;return;}runSim();show("live");};
 function runSim(){
   SIM.on=true;sensorsOn=true;gpsOn=true;$("bTrip").disabled=false;$("bSensors").disabled=true;
   // phone mounted rotated: yaw 70°, tilted 60° back, mirrored axes unknown to algorithm
-  const yaw=rad(70),tilt=rad(60);
+  let yaw=rad(70),tilt=rad(60);
   const Rz=v=>[v[0]*Math.cos(yaw)-v[1]*Math.sin(yaw),v[0]*Math.sin(yaw)+v[1]*Math.cos(yaw),v[2]];
   const Rx=v=>[v[0],v[1]*Math.cos(tilt)-v[2]*Math.sin(tilt),v[1]*Math.sin(tilt)+v[2]*Math.cos(tilt)];
   const toPhone=v=>Rx(Rz(v)); // vehicle (x fwd, y left, z up) -> phone
   // scripted profile: [duration s, target km/h, yawRate deg/s]
-  const plan=[[8,0,0],[12,50,0],[20,50,0],[6,50,9],[15,50,0],[3,15,0],[8,15,-22],[10,70,0],[25,90,0],[5,90,6],[20,130,0],[60,135,0],[8,60,0],[10,60,-10],[12,60,10],[25,80,0],[3,30,0],[6,30,25],[15,50,0],[10,0,0],[20,0,0],[10,40,0],[20,40,-5],[10,0,0]];
+  const plan=[[8,0,0],[12,50,0],[20,50,0],[6,50,9],[15,50,0],[3,15,0],[8,15,-22],[10,70,0],[25,90,0],[5,90,6],[20,130,0],[60,135,0],[8,60,0],[10,60,-10],[12,60,10],[25,80,0],[6,50,0],[15,50,20],[5,50,0],[3,30,0],[6,30,25],[15,50,0],[10,0,0],[20,0,0],[10,40,0],[20,40,-5],[10,0,0]];
   let st={lat:45.4642,lon:9.19,alt:120,v:0,hdg:40,t:Date.now()},seg=0,segT=0,simT=Date.now(),lastFixT=0,yawRate=0,aLon=0;
   if(!trip)startTrip(simT);
   const dtStep=0.02;
@@ -466,13 +489,14 @@ function runSim(){
       const d=st.v*dtStep;st.lat+=d*Math.cos(rad(st.hdg))/111320;st.lon+=d*Math.sin(rad(st.hdg))/(111320*Math.cos(rad(st.lat)));
       st.alt+=d*0.02*Math.sin(simT/60000);
       simT+=dtStep*1000;segT+=dtStep;
-      if(segT>=dur){seg++;segT=0;if(seg>=plan.length){SIM.on=false;endTrip();toast("Simulazione completata",3000);status();return;}}
+      if(segT>=dur){seg++;segT=0;if(seg===plan.length-12){yaw=rad(160);tilt=rad(35);SIM.moved=true;}if(seg>=plan.length){SIM.on=false;endTrip();toast("Simulazione completata",3000);status();return;}}
       // motion sample every 0.02 s
       const aLat=st.v*rad(yawRate); // to the right when yawRate>0 (clockwise)
       SIM.truth={lon:aLon/G,lat:aLat/G};
       const veh=[aLon+ (Math.random()-0.5)*0.4, -aLat+(Math.random()-0.5)*0.4, (Math.random()-0.5)*0.6]; // y=left
       const gph=toPhone([0,0,G]), lin=toPhone(veh);
-      processMotion(simT,{x:lin[0]+gph[0],y:lin[1]+gph[1],z:lin[2]+gph[2]},{x:lin[0],y:lin[1],z:lin[2]});
+      const vib=[(Math.random()-0.5)*1.5,(Math.random()-0.5)*1.5,(Math.random()-0.5)*2.5];
+      processMotion(simT,{x:lin[0]+gph[0]+vib[0],y:lin[1]+gph[1]+vib[1],z:lin[2]+gph[2]+vib[2]},null);
       if(simT-lastFixT>=1000){lastFixT=simT;
         processFix({t:simT,lat:st.lat+(Math.random()-0.5)*0.00002,lon:st.lon+(Math.random()-0.5)*0.00002,alt:st.alt+(Math.random()-0.5)*2,acc:5,v:Math.max(0,st.v+(Math.random()-0.5)*0.2),hdg:st.v>1?st.hdg:null});}
     }
