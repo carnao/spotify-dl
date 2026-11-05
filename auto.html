@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>Telemetria Auto</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{--bg:#0b0f14;--card:#131a22;--line:#25303c;--tx:#e6edf3;--mut:#8b98a5;--a:#58a6ff;--b:#3fb950;--c:#f0883e;--d:#d2a8ff;--r:#f85149;--y:#e3b341}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,Roboto,sans-serif}
+body{padding:calc(env(safe-area-inset-top) + 8px) 10px calc(env(safe-area-inset-bottom) + 70px)}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);margin:0 0 8px;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin:8px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.k{color:var(--mut);font-size:11.5px}.v{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}.v small{font-size:12px;color:var(--mut);font-weight:400}
+button,select,input{font:inherit;color:var(--tx)}
+button{background:#21262d;border:1px solid var(--line);border-radius:10px;padding:10px 13px}
+button.pri{background:#238636;border-color:#2ea043;font-weight:600}button.dan{background:#8e1519;border-color:#da3633;font-weight:600}
+button:disabled{opacity:.45}
+input,select{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:7px 8px;width:100%}
+canvas{width:100%;display:block}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:#0d1117ee;backdrop-filter:blur(8px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:1000}
+.tabs button{flex:1;border:0;border-radius:0;background:none;padding:12px 4px;color:var(--mut);font-size:13px}
+.tabs button.on{color:var(--a);font-weight:600}
+.view{display:none}.view.on{display:block}
+.hud{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center}
+.speed{font-size:76px;font-weight:750;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-2px}
+.speed small{font-size:16px;color:var(--mut);letter-spacing:0;font-weight:400}
+.pill{display:inline-block;font-size:12px;padding:3px 8px;border-radius:99px;background:#21262d;color:var(--mut);margin:2px 4px 2px 0}
+.pill.ok{background:#12361d;color:#56d364}.pill.warn{background:#3b2a07;color:var(--y)}.pill.bad{background:#3d1214;color:#ff7b72}
+.score{font-size:34px;font-weight:750}
+.bar{height:8px;background:#21262d;border-radius:4px;overflow:hidden}.bar>div{height:100%;width:0;transition:width .3s}
+table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 0;border-bottom:1px solid var(--line);vertical-align:top}td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.ev{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.toast{position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:50%;transform:translateX(-50%);background:#3d1214;border:1px solid var(--r);color:#fff;padding:10px 16px;border-radius:12px;font-weight:600;z-index:2000;display:none;font-size:16px}
+.map{height:260px;border-radius:10px;overflow:hidden;background:#0d1117}
+.leg span{font-size:11.5px;margin-right:10px;color:var(--mut)}.leg b{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:4px}
+.trip{padding:9px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;cursor:pointer}
+.mut{color:var(--mut);font-size:13px}
+.banner{background:#1c2a3a;border:1px solid #1f6feb;border-radius:12px;padding:10px;margin:8px 0;font-size:14px}
+.leaflet-container{background:#0d1117}
+.lbl{font-size:12.5px;color:var(--mut);margin:8px 0 3px}
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+
+<!-- ============ LIVE ============ -->
+<section class="view on" id="v-live">
+  <div id="banners"></div>
+  <div class="card">
+    <div class="row">
+      <button class="pri" id="bSensors">▶︎ Attiva sensori</button>
+      <button class="pri" id="bTrip" disabled>Inizia viaggio</button>
+      <button id="bWake">🔆 Schermo</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label class="mut" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="autoTrip" style="width:auto" checked> Avvio/stop automatico viaggio</label>
+    </div>
+    <div id="status" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <div class="hud">
+      <div>
+        <div class="speed" id="lSpeed">0<small> km/h</small></div>
+        <div class="mut" id="lSub">–</div>
+      </div>
+      <canvas id="gball" height="170"></canvas>
+    </div>
+    <div class="grid g3" style="margin-top:10px">
+      <div><div class="k">Long. (acc/fren)</div><div class="v" id="lLong">–</div></div>
+      <div><div class="k">Laterale</div><div class="v" id="lLat">–</div></div>
+      <div><div class="k">Rotta</div><div class="v" id="lHdg">–</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Viaggio in corso</h2>
+    <div class="grid g3">
+      <div><div class="k">Distanza</div><div class="v" id="tDist">–</div></div>
+      <div><div class="k">Tempo</div><div class="v" id="tTime">–</div></div>
+      <div><div class="k">Media</div><div class="v" id="tAvg">–</div></div>
+      <div><div class="k">Punteggio guida</div><div class="v" id="tScore">–</div></div>
+      <div><div class="k">Punteggio eco</div><div class="v" id="tEco">–</div></div>
+      <div><div class="k">Consumo stimato</div><div class="v" id="tFuel">–</div></div>
+    </div>
+    <div class="row" style="margin-top:8px" id="tEvents"></div>
+  </div>
+
+  <div class="card">
+    <h2>Mappa</h2>
+    <div class="map" id="liveMap"></div>
+  </div>
+
+  <div class="card">
+    <h2>g longitudinale e laterale · ultimi 60 s</h2>
+    <canvas id="cLiveG" height="130"></canvas>
+    <div class="leg"><span><b style="background:var(--a)"></b>longitudinale</span><span><b style="background:var(--c)"></b>laterale</span></div>
+  </div>
+</section>
+
+<!-- ============ TRIP ============ -->
+<section class="view" id="v-trip">
+  <div class="card">
+    <div class="row"><select id="tripSel" style="flex:1"></select></div>
+  </div>
+  <div id="tripBody"></div>
+</section>
+
+<!-- ============ HISTORY ============ -->
+<section class="view" id="v-hist">
+  <div class="card">
+    <h2>Totali</h2>
+    <div class="grid g3" id="totals"></div>
+  </div>
+  <div class="card">
+    <h2>Ultimi 30 giorni · km e punteggio</h2>
+    <canvas id="cDays" height="170"></canvas>
+    <div class="leg"><span><b style="background:var(--a)"></b>km al giorno</span><span><b style="background:var(--b)"></b>punteggio guida</span><span><b style="background:var(--y)"></b>eco</span></div>
+  </div>
+  <div class="card">
+    <h2>Giorni</h2>
+    <div id="dayList"></div>
+  </div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section class="view" id="v-set">
+  <div class="card">
+    <h2>Veicolo (per stima consumi)</h2>
+    <div class="grid">
+      <div><div class="lbl">Carburante</div><select id="sFuel"><option value="petrol">Benzina</option><option value="diesel">Diesel</option><option value="lpg">GPL</option><option value="ev">Elettrica</option></select></div>
+      <div><div class="lbl">Prezzo (€/L o €/kWh)</div><input id="sPrice" type="number" step="0.01"></div>
+      <div><div class="lbl">Massa con persone (kg)</div><input id="sMass" type="number"></div>
+      <div><div class="lbl">Cd·A (m²)</div><input id="sCdA" type="number" step="0.01"></div>
+      <div><div class="lbl">Resistenza rotolamento</div><input id="sCrr" type="number" step="0.001"></div>
+      <div><div class="lbl">Rendimento motore (0–1)</div><input id="sEff" type="number" step="0.01"></div>
+      <div><div class="lbl">Consumo al minimo (L/h)</div><input id="sIdle" type="number" step="0.1"></div>
+      <div><div class="lbl">Recupero frenata (EV, 0–1)</div><input id="sRegen" type="number" step="0.05"></div>
+    </div>
+    <div class="mut" style="margin-top:6px">Valori tipici: utilitaria 1.200 kg, Cd·A 0,60; SUV 1.700 kg, Cd·A 0,85. Rendimento medio: benzina 0,24, diesel 0,30, elettrica 0,85.</div>
+  </div>
+  <div class="card">
+    <h2>Soglie eventi (g)</h2>
+    <div class="grid g3">
+      <div><div class="lbl">Frenata brusca</div><input id="sBrake" type="number" step="0.01"></div>
+      <div><div class="lbl">Accelerazione</div><input id="sAcc" type="number" step="0.01"></div>
+      <div><div class="lbl">Curva</div><input id="sCorner" type="number" step="0.01"></div>
+      <div><div class="lbl">Limite velocità (km/h)</div><input id="sLimit" type="number"></div>
+      <div><div class="lbl">Avviso sonoro</div><select id="sBeep"><option value="1">Sì</option><option value="0">No</option></select></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Dati</h2>
+    <div class="row">
+      <button id="bBackup">⬇︎ Backup completo (JSON)</button>
+      <label class="mut"><button onclick="document.getElementById('fImport').click()">⬆︎ Importa backup</button><input type="file" id="fImport" accept=".json" style="display:none"></label>
+      <button id="bRecal">Ricalibra orientamento</button>
+      <button id="bDemo">🧪 Simula un viaggio</button>
+      <button class="dan" id="bWipe">Cancella tutto</button>
+    </div>
+    <div class="mut" id="storageInfo" style="margin-top:8px"></div>
+  </div>
+  <div class="card mut">
+    <h2>Come funziona</h2>
+    Il telefono va fissato in un supporto, in qualsiasi orientamento. La pagina impara da sola come è montato confrontando l'accelerometro con le variazioni di velocità e direzione del GPS: dopo qualche accelerazione, frenata e curva compare "orientamento calibrato". Prima di allora i valori g vengono ricavati solo dal GPS (meno precisi, 1 al secondo).<br><br>
+    Il consumo è una <b>stima fisica</b> (massa, aerodinamica, rotolamento, pendenza, rendimento): non legge la centralina dell'auto. Il punteggio eco misura soprattutto quanta energia sprechi in frenata, in accelerazioni brusche, a velocità alte e al minimo.<br><br>
+    Tieni lo schermo acceso (pulsante 🔆) e la pagina in primo piano: con lo schermo spento il browser sospende i sensori. Tutti i dati restano solo su questo telefono.
+  </div>
+</section>
+
+<nav class="tabs">
+  <button class="on" data-v="live">Live</button>
+  <button data-v="trip">Viaggio</button>
+  <button data-v="hist">Storico</button>
+  <button data-v="set">Impostazioni</button>
+</nav>
+
+<script>
+"use strict";
+/* ================= utils ================= */
+const $=id=>document.getElementById(id);
+const G=9.80665, R_E=6371000, rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+function hav(a,b){const dl=rad(b.lat-a.lat),dn=rad(b.lon-a.lon);const h=Math.sin(dl/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dn/2)**2;return 2*R_E*Math.asin(Math.min(1,Math.sqrt(h)));}
+function brg(a,b){const y=Math.sin(rad(b.lon-a.lon))*Math.cos(rad(b.lat));const x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(rad(b.lon-a.lon));return (deg(Math.atan2(y,x))+360)%360;}
+const wrap180=d=>((d+540)%360)-180;
+const card8=d=>["N","NE","E","SE","S","SO","O","NO"][Math.round(d/45)%8];
+const fmtDur=s=>{s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;return h?`${h}h ${String(m).padStart(2,"0")}m`:`${m}:${String(ss).padStart(2,"0")}`;};
+const fmtKm=m=>m<10000?(m/1000).toFixed(2):(m/1000).toFixed(1);
+const dayKey=t=>{const d=new Date(t);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+const scoreCls=s=>s>=85?"ok":s>=65?"warn":"bad";
+function toast(msg,ms=2500){const t=$("toast");t.textContent=msg;t.style.display="block";clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display="none",ms);}
+let audioCtx=null;
+function beep(f=880,d=0.15){if(S.beep!=="1")return;try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=f;g.gain.value=0.15;o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}catch(e){}}
+function download(name,text,type){const b=new Blob([text],{type});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);}
+
+/* ================= settings ================= */
+const DEF={fuel:"petrol",price:1.75,mass:1400,cda:0.65,crr:0.012,eff:0.24,idle:0.8,regen:0.6,brake:0.30,acc:0.25,corner:0.35,limit:130,beep:"1"};
+const FUEL={petrol:{kwh:8.9,co2:2.31,u:"L"},diesel:{kwh:10.0,co2:2.64,u:"L"},lpg:{kwh:7.0,co2:1.66,u:"L"},ev:{kwh:1,co2:0.25,u:"kWh"}};
+let S=Object.assign({},DEF);
+try{Object.assign(S,JSON.parse(localStorage.getItem("autoSettings")||"{}"));}catch(e){}
+const SMAP={sFuel:"fuel",sPrice:"price",sMass:"mass",sCdA:"cda",sCrr:"crr",sEff:"eff",sIdle:"idle",sRegen:"regen",sBrake:"brake",sAcc:"acc",sCorner:"corner",sLimit:"limit",sBeep:"beep"};
+for(const [id,k] of Object.entries(SMAP)){const el=$(id);el.value=S[k];el.onchange=()=>{S[k]=el.type==="number"?parseFloat(el.value):el.value;
+  if(id==="sFuel"){const e={petrol:0.24,diesel:0.30,lpg:0.23,ev:0.85}[S.fuel];S.eff=e;$("sEff").value=e;if(S.fuel==="ev"){S.idle=0.3;$("sIdle").value=0.3;}}
+  try{localStorage.setItem("autoSettings",JSON.stringify(S));}catch(e){}};}
+
+/* ================= storage (IndexedDB) ================= */
+let db=null;
+function idb(){return new Promise((res,rej)=>{if(!window.indexedDB)return rej("no idb");const r=indexedDB.open("autoTelemetry",1);
+  r.onupgradeneeded=()=>{r.result.createObjectStore("trips",{keyPath:"id"});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+function tx(mode,fn){return new Promise((res,rej)=>{if(!db)return rej("no db");const t=db.transaction("trips",mode);const st=t.objectStore("trips");const out=fn(st);t.oncomplete=()=>res(out&&out.result!==undefined?out.result:out);t.onerror=()=>rej(t.error);});}
+const putTrip=t=>tx("readwrite",s=>s.put(t)).catch(()=>{});
+const delTrip=id=>tx("readwrite",s=>s.delete(id));
+const allTrips=()=>tx("readonly",s=>s.getAll()).then(a=>a.sort((x,y)=>y.start-x.start)).catch(()=>[]);
+
+/* ================= sensor fusion ================= */
+// Calibration: map phone horizontal accel (2D in a gravity-fixed basis) to vehicle frame (long, lat)
+const CAL={g:null,e1:null,e2:null,sumRot:[0,0],sumRef:[0,0],norm:0,n:0,mode:0,phi:0,conf:0,ok:false};
+function v3(a){return [a.x,a.y,a.z];}
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const nrm=a=>{const l=Math.hypot(...a)||1;return a.map(x=>x/l);};
+function resetCal(gv){CAL.g=gv?nrm(gv):null;CAL.sumRot=[0,0];CAL.sumRef=[0,0];CAL.norm=0;CAL.n=0;CAL.ok=false;CAL.conf=0;
+  if(CAL.g){const ax=[[1,0,0],[0,1,0],[0,0,1]].sort((p,q)=>Math.abs(dot(p,CAL.g))-Math.abs(dot(q,CAL.g)))[0];CAL.e1=nrm(cross(CAL.g,ax));CAL.e2=cross(CAL.g,CAL.e1);}}
+let gLP=null; // low-pass gravity (fallback)
+let hAcc=[0,0], hCnt=0;   // horizontal accel accumulator between GPS fixes
+let fused={lon:0,lat:0,src:"–"}, smooth={lon:0,lat:0};
+let fAcc=[0,0,0];
+let lastMotionT=0, motionRate=0, motionCount=0;
+
+function processMotion(t,aig,alin){
+  motionCount++;
+  let gv,lin;
+  if(alin&&alin.x!=null&&aig&&aig.x!=null){lin=v3(alin);gv=[aig.x-alin.x,aig.y-alin.y,aig.z-alin.z];}
+  else if(aig&&aig.x!=null){const a=v3(aig);gLP=gLP?gLP.map((g,i)=>g+0.02*(a[i]-g)):a;gv=gLP;lin=a.map((x,i)=>x-gLP[i]);}
+  else return;
+  const gn=nrm(gv);
+  if(!CAL.g)resetCal(gn);
+  else if(dot(gn,CAL.g)<Math.cos(rad(20))){resetCal(gn);toast("Telefono spostato: ricalibro");}
+  else{CAL.g=nrm(CAL.g.map((x,i)=>x*0.999+gn[i]*0.001));}
+  // horizontal component in basis
+  const hz=lin.map((x,i)=>x-dot(lin,CAL.g)*CAL.g[i]);
+  const h1=dot(hz,CAL.e1)/G, h2=dot(hz,CAL.e2)/G;
+  hAcc[0]+=h1;hAcc[1]+=h2;hCnt++;
+  if(CAL.ok){
+    const c=Math.cos(CAL.phi), s=Math.sin(CAL.phi), y=CAL.mode? -h2: h2;
+    const lon=c*h1-s*y, lat=s*h1+c*y;
+    smooth.lon+=0.12*(lon-smooth.lon); smooth.lat+=0.12*(lat-smooth.lat);
+    fused={lon:smooth.lon,lat:smooth.lat,src:"acc"};
+    fAcc[0]+=lon;fAcc[1]+=lat;fAcc[2]++;
+    onDynamics(t,fused.lon,fused.lat);
+  }
+}
+function calibrateStep(gLon,gLat,v){
+  if(hCnt<3){hAcc=[0,0];hCnt=0;return;}
+  const w1=hAcc[0]/hCnt, w2=hAcc[1]/hCnt; hAcc=[0,0];hCnt=0;
+  if(!CAL.g)return;
+  const zl=Math.hypot(gLon,gLat), wl=Math.hypot(w1,w2);
+  if(zl<0.06||wl<0.03||v<3)return;
+  // rotation hypothesis: z ≈ e^{iφ} w  -> Σ z·conj(w);  reflection: z ≈ e^{iφ} conj(w) -> Σ z·w
+  CAL.sumRot[0]+=gLon*w1+gLat*w2; CAL.sumRot[1]+=gLat*w1-gLon*w2;
+  CAL.sumRef[0]+=gLon*w1-gLat*w2; CAL.sumRef[1]+=gLat*w1+gLon*w2;
+  CAL.norm+=zl*wl; CAL.n++;
+  const rR=Math.hypot(...CAL.sumRot), rF=Math.hypot(...CAL.sumRef);
+  CAL.mode=rF>rR?1:0; const s=CAL.mode?CAL.sumRef:CAL.sumRot;
+  CAL.phi=Math.atan2(s[1],s[0]); CAL.conf=Math.max(rR,rF)/CAL.norm;
+  const was=CAL.ok; CAL.ok=CAL.n>=12&&CAL.conf>0.55;
+  if(CAL.ok&&!was)toast("✓ Orientamento calibrato",1800);
+}
+
+/* ================= trip model ================= */
+let trip=null;              // active trip
+let lastFix=null, lastFixKin=null, gpsOn=false, watchId=null;
+const live60=[];            // {t,lon,lat} for live chart
+let evState={brake:null,acc:null,corner:null};
+let stillSince=null, movingSince=null, overLimit=false;
+
+function newTrip(t){return {id:"t"+t,start:t,end:t,active:true,pts:[],events:[],
+  st:{dist:0,moving:0,idle:0,stops:0,maxV:0,maxLat:0,maxBrake:0,maxAcc:0,gain:0,loss:0,ePos:0,eBrake:0,eAggr:0,eHigh:0,jerkSum:0,jerkN:0,overT:0,hist:new Array(16).fill(0),
+      best0100:null,best050:null,corners:0},
+  _run:null,_altRef:null,_stopped:false};}
+
+function startTrip(t=Date.now()){if(trip)return;trip=newTrip(t);evState={brake:null,acc:null,corner:null};$("bTrip").textContent="Termina viaggio";$("bTrip").className="dan";toast("Viaggio iniziato",1500);putTrip(pack(trip));renderLive();}
+async function endTrip(){if(!trip)return;const tr=trip;trip=null;tr.active=false;tr.end=tr.pts.length?tr.pts[tr.pts.length-1].t:Date.now();
+  finalize(tr);$("bTrip").textContent="Inizia viaggio";$("bTrip").className="pri";
+  if(tr.st.dist<200){await delTrip(tr.id).catch(()=>{});toast("Viaggio troppo breve, scartato");}
+  else{await putTrip(pack(tr));toast(`Viaggio salvato: ${fmtKm(tr.st.dist)} km · guida ${tr.score} · eco ${tr.eco}`,3500);}
+  await refreshLists();renderLive();}
+function pack(tr){const o=Object.assign({},tr);delete o._run;delete o._altRef;delete o._stopped;delete o._prevLonG;return o;}
+
+function processFix(f){ // f:{t,lat,lon,alt,acc,v,hdg}
+  if(f.acc!=null&&f.acc>60)return status("GPS impreciso (±"+Math.round(f.acc)+" m)","warn");
+  const p=lastFix;
+  if(p&&f.t<=p.t)return;
+  // speed fallback
+  if((f.v==null||isNaN(f.v))&&p){f.v=hav(p,f)/((f.t-p.t)/1000);}
+  if(f.v==null||isNaN(f.v))f.v=0;
+  if((f.hdg==null||isNaN(f.hdg))&&p&&hav(p,f)>3)f.hdg=brg(p,f);
+  if((f.hdg==null||isNaN(f.hdg))&&p)f.hdg=p.hdg;
+  // kinematics from GPS
+  let gLon=0,gLat=0;
+  if(p){const dt=(f.t-p.t)/1000;if(dt>0&&dt<5){gLon=(f.v-p.v)/dt/G;
+    if(f.v>3&&p.v>3&&f.hdg!=null&&p.hdg!=null){gLat=((f.v+p.v)/2)*rad(wrap180(f.hdg-p.hdg))/dt/G;}}}
+  gLon=clamp(gLon,-1.2,1.2);gLat=clamp(gLat,-1.2,1.2);
+  calibrateStep(gLon,gLat,f.v);
+  if(!CAL.ok){fused={lon:gLon,lat:gLat,src:"gps"};onDynamics(f.t,gLon,gLat);}
+  const aL=fAcc[2]>3?fAcc[0]/fAcc[2]:fused.lon, aT=fAcc[2]>3?fAcc[1]/fAcc[2]:fused.lat; fAcc=[0,0,0];
+  f.gLon=+aL.toFixed(3);f.gLat=+aT.toFixed(3);f.gpsLon=gLon;
+  lastFix=f;
+  autoTrip(f);
+  if(trip)addPoint(trip,f,gLon);
+  status();
+  renderLive();
+}
+
+function addPoint(tr,f,gpsLon){
+  const st=tr.st, prev=tr.pts[tr.pts.length-1];
+  const pt={t:f.t,lat:+f.lat.toFixed(6),lon:+f.lon.toFixed(6),alt:f.alt!=null?Math.round(f.alt*10)/10:null,v:+f.v.toFixed(2),hdg:f.hdg!=null?Math.round(f.hdg):null,acc:f.acc!=null?Math.round(f.acc):null,gLon:f.gLon,gLat:f.gLat};
+  tr.pts.push(pt);tr.end=f.t;
+  if(!prev)return;
+  const dt=(f.t-prev.t)/1000; if(dt<=0||dt>30)return;
+  const d=hav(prev,pt);
+  if(pt.v>0.8||d>dt*1.5)st.dist+=d;
+  if(pt.v>2&&prev.v>2&&dt<3){const j=(pt.gLon-prev.gLon)/dt;st.jerkSum+=j*j*dt;st.jerkN+=dt;}
+  const v=pt.v, kmh=v*3.6;
+  if(v>1.5){st.moving+=dt;st.hist[clamp(Math.floor(kmh/10),0,15)]+=dt;}else if(v<0.6)st.idle+=dt;
+  if(v<1){if(!tr._stopped&&st.moving>5){st.stops++;}tr._stopped=true;}else if(v>3)tr._stopped=false;
+  st.maxV=Math.max(st.maxV,v);
+  if(kmh>S.limit){st.overT+=dt;if(!overLimit){overLimit=true;beep(660,0.3);toast(`Oltre ${S.limit} km/h`);}}else if(kmh<S.limit-3)overLimit=false;
+  // elevation with hysteresis
+  if(pt.alt!=null&&(pt.acc==null||pt.acc<25)){if(tr._altRef==null)tr._altRef=pt.alt;const da=pt.alt-tr._altRef;if(da>4){st.gain+=da;tr._altRef=pt.alt;}else if(da<-4){st.loss-=da;tr._altRef=pt.alt;}}
+  // energy model (per GPS step)
+  const m=S.mass, vm=(v+prev.v)/2, a=gpsLon*G;
+  let slope=0;const back=tr.pts.slice(-12);if(back.length>=8&&back[0].alt!=null&&pt.alt!=null){const dd=hav(back[0],pt);if(dd>60)slope=clamp((pt.alt-back[0].alt)/dd,-0.12,0.12);}
+  const Faero=0.5*1.2*S.cda*vm*vm, Froll=S.crr*m*G*(vm>0.5?1:0), Fgrade=m*G*slope, Finert=m*a;
+  const P=(Finert+Faero+Froll+Fgrade)*vm;
+  if(P>0){st.ePos+=P*dt;if(gpsLon>0.2)st.eAggr+=Finert*vm*dt;if(kmh>110)st.eHigh+=Faero*vm*dt*(1-Math.pow(110/kmh,2));}
+  else st.eBrake+=-P*dt; // energy that brakes had to dissipate
+  // 0-100 / 0-50 runs
+  if(kmh<5)tr._run={t0:pt.t,b50:false};
+  else if(tr._run){if(gpsLon<-0.05)tr._run=null;else{const el=(pt.t-tr._run.t0)/1000;
+    if(kmh>=50&&!tr._run.b50){tr._run.b50=true;if(!st.best050||el<st.best050)st.best050=+el.toFixed(1);}
+    if(kmh>=100){if(!st.best0100||el<st.best0100){st.best0100=+el.toFixed(1);toast(`0–100 km/h: ${el.toFixed(1)} s`);}tr._run=null;}}}
+}
+
+let lastDynT=0;
+function onDynamics(t,lon,lat){
+  // events with hysteresis; t in ms
+  const now=t;
+  live60.push({t:now,lon,lat});while(live60.length&&now-live60[0].t>60000)live60.shift();
+  if(!trip||!lastFix||lastFix.v<2.5){evState={brake:null,acc:null,corner:null};return;}
+  const st=trip.st;
+  // jerk
+  st.maxLat=Math.max(st.maxLat,Math.abs(lat));st.maxBrake=Math.max(st.maxBrake,-lon);st.maxAcc=Math.max(st.maxAcc,lon);
+  ev("brake",-lon,S.brake,"Frenata brusca",now);
+  ev("acc",lon,S.acc,"Accelerazione brusca",now);
+  ev("corner",Math.abs(lat),S.corner,"Curva veloce",now,lat);
+  // corner counting (|lat| > 0.15g sustained)
+  if(Math.abs(lat)>0.15){if(!onDynamics.inC){onDynamics.inC=now;}}else if(onDynamics.inC){if(now-onDynamics.inC>1500)st.corners++;onDynamics.inC=0;}
+}
+function ev(kind,val,thr,label,now,sign){
+  const s=evState[kind];
+  if(val>thr){if(!s)evState[kind]={t0:now,peak:val,sg:sign};else{s.peak=Math.max(s.peak,val);}}
+  else if(s&&val<thr*0.7){evState[kind]=null;
+    if(now-s.t0>=350&&trip){const sev=s.peak>=thr*1.4?2:1;
+      trip.events.push({t:now,type:kind,peak:+s.peak.toFixed(2),sev,lat:lastFix?lastFix.lat:null,lon:lastFix?lastFix.lon:null,v:lastFix?+(lastFix.v*3.6).toFixed(0):null,dir:kind==="corner"?(s.sg>0?"dx":"sx"):null});
+      beep(sev==2?440:700,0.12);toast(`${label}: ${s.peak.toFixed(2)} g${sev==2?" ‼️":""}`);}}
+}
+
+/* ================= scoring ================= */
+function computeScores(tr){
+  const st=tr.st, km=st.dist/1000;
+  const w={brake:[3,8],acc:[2,5],corner:[2.5,6]};
+  let P=0;for(const e of tr.events)P+=w[e.type][e.sev-1];
+  const evPen=Math.min(55,P*12/(km+4));
+  const jerk=st.jerkN>5?Math.sqrt(st.jerkSum/st.jerkN):0; // g/s
+  const smoothPen=clamp((jerk-0.05)*100,0,20);
+  const overShare=st.moving>0?st.overT/st.moving:0;
+  const speedPen=Math.min(25,overShare*100);
+  const score=Math.round(clamp(100-evPen-smoothPen-speedPen,0,100));
+  // eco
+  const ep=st.ePos||1;
+  const brakeRatio=st.eBrake/ep, aggrRatio=st.eAggr/ep, highRatio=st.eHigh/ep;
+  const tot=st.moving+st.idle, idleShare=tot>0?st.idle/tot:0;
+  const eco=Math.round(clamp(100-brakeRatio*90-aggrRatio*60-highRatio*80-idleShare*40,0,100));
+  // fuel
+  const F=FUEL[S.fuel];let energy=st.ePos/3.6e6/S.eff; // kWh input (fuel energy)
+  if(S.fuel==="ev")energy-=st.eBrake/3.6e6*S.regen*S.eff;
+  let qty=Math.max(0,energy/F.kwh)+st.idle/3600*S.idle;
+  const per100=km>0.5?qty/km*100:null;
+  return {score,eco,jerk:+jerk.toFixed(3),overShare,brakeRatio,aggrRatio,highRatio,idleShare,qty,per100,co2:qty*F.co2,cost:qty*S.price,unit:F.u};
+}
+function finalize(tr){const c=computeScores(tr);tr.score=c.score;tr.eco=c.eco;tr.calc=c;tr.settingsAtEnd={fuel:S.fuel,mass:S.mass};}
+
+/* ================= auto trip ================= */
+function autoTrip(f){
+  if(!$("autoTrip").checked)return;
+  const kmh=f.v*3.6;
+  if(!trip){if(kmh>12){movingSince=movingSince||f.t;if(f.t-movingSince>6000){startTrip(f.t);}}else movingSince=null;}
+  else{if(kmh<2){stillSince=stillSince||f.t;if(f.t-stillSince>5*60000){endTrip();stillSince=null;}}else stillSince=null;}
+}
+
+/* ================= real sensors ================= */
+let sensorsOn=false, wakeLock=null;
+function status(msg,cls){
+  const p=[];
+  if(msg)p.push(`<span class="pill ${cls||""}">${msg}</span>`);
+  else if(gpsOn&&lastFix)p.push(`<span class="pill ok">GPS ±${Math.round(lastFix.acc||0)} m</span>`);
+  else if(gpsOn)p.push(`<span class="pill warn">In attesa del GPS…</span>`);
+  if(sensorsOn)p.push(motionRate>5?`<span class="pill ok">Accelerometro ${Math.round(motionRate)} Hz</span>`:`<span class="pill bad">Accelerometro assente</span>`);
+  if(sensorsOn)p.push(CAL.ok?`<span class="pill ok">Orientamento calibrato ${Math.round(CAL.conf*100)}%</span>`:`<span class="pill warn">Calibrazione ${CAL.n}/12 · guida normalmente</span>`);
+  if(wakeLock)p.push(`<span class="pill ok">Schermo sempre acceso</span>`);
+  if(SIM.on)p.push(`<span class="pill warn">SIMULAZIONE ×${SIM.speed}</span>`);
+  $("status").innerHTML=p.join("");
+}
+setInterval(()=>{motionRate=motionCount;motionCount=0;if(sensorsOn)status();},1000);
+
+$("bSensors").onclick=async()=>{
+  if(sensorsOn)return;
+  try{if(window.DeviceMotionEvent&&DeviceMotionEvent.requestPermission)await DeviceMotionEvent.requestPermission();}catch(e){}
+  sensorsOn=true;$("bSensors").textContent="Sensori attivi";$("bSensors").disabled=true;$("bTrip").disabled=false;
+  addEventListener("devicemotion",e=>{if(SIM.on)return;processMotion(performance.timeOrigin+e.timeStamp,e.accelerationIncludingGravity,e.acceleration);});
+  if(!isSecureContext)status("Pagina non sicura: apri il link https","bad");
+  if(navigator.geolocation){gpsOn=true;watchId=navigator.geolocation.watchPosition(p=>{if(SIM.on)return;const c=p.coords;
+      processFix({t:p.timestamp,lat:c.latitude,lon:c.longitude,alt:c.altitude,acc:c.accuracy,v:c.speed,hdg:c.heading});},
+    e=>status("GPS: "+(e.code===1?"permesso negato":e.message),"bad"),{enableHighAccuracy:true,maximumAge:0,timeout:30000});}
+  requestWake();status();
+};
+$("bTrip").onclick=()=>trip?endTrip():startTrip();
+async function requestWake(){try{wakeLock=await navigator.wakeLock.request("screen");wakeLock.addEventListener("release",()=>{wakeLock=null;status();});status();}catch(e){}}
+$("bWake").onclick=requestWake;
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&sensorsOn&&!wakeLock)requestWake();if(document.visibilityState==="hidden"&&trip)putTrip(pack(trip));});
+$("bRecal").onclick=()=>{resetCal(null);toast("Calibrazione azzerata");};
+setInterval(()=>{if(trip)putTrip(pack(trip));},15000);
+
+/* ================= simulation ================= */
+const SIM={on:false,speed:8};
+$("bDemo").onclick=()=>{if(SIM.on){SIM.on=false;return;}runSim();show("live");};
+function runSim(){
+  SIM.on=true;sensorsOn=true;gpsOn=true;$("bTrip").disabled=false;$("bSensors").disabled=true;
+  // phone mounted rotated: yaw 70°, tilted 60° back, mirrored axes unknown to algorithm
+  const yaw=rad(70),tilt=rad(60);
+  const Rz=v=>[v[0]*Math.cos(yaw)-v[1]*Math.sin(yaw),v[0]*Math.sin(yaw)+v[1]*Math.cos(yaw),v[2]];
+  const Rx=v=>[v[0],v[1]*Math.cos(tilt)-v[2]*Math.sin(tilt),v[1]*Math.sin(tilt)+v[2]*Math.cos(tilt)];
+  const toPhone=v=>Rx(Rz(v)); // vehicle (x fwd, y left, z up) -> phone
+  // scripted profile: [duration s, target km/h, yawRate deg/s]
+  const plan=[[8,0,0],[12,50,0],[20,50,0],[6,50,9],[15,50,0],[3,15,0],[8,15,-22],[10,70,0],[25,90,0],[5,90,6],[20,130,0],[60,135,0],[8,60,0],[10,60,-10],[12,60,10],[25,80,0],[3,30,0],[6,30,25],[15,50,0],[10,0,0],[20,0,0],[10,40,0],[20,40,-5],[10,0,0]];
+  let st={lat:45.4642,lon:9.19,alt:120,v:0,hdg:40,t:Date.now()},seg=0,segT=0,simT=Date.now(),lastFixT=0,yawRate=0,aLon=0;
+  if(!trip)startTrip(simT);
+  const dtStep=0.02;
+  function tick(){
+    if(!SIM.on){toast("Simulazione interrotta");return;}
+    const steps=Math.round(SIM.speed*0.1/dtStep);
+    for(let i=0;i<steps;i++){
+      const [dur,target,yr]=plan[seg];const tv=target/3.6;
+      const want=clamp((tv-st.v)*0.6,-0.55*G,0.38*G);
+      aLon+= (want-aLon)*0.08;
+      st.v=Math.max(0,st.v+aLon*dtStep); yawRate+=(yr-yawRate)*0.05;
+      if(st.v<0.5)yawRate=0;
+      st.hdg=(st.hdg+yawRate*dtStep+360)%360;
+      const d=st.v*dtStep;st.lat+=d*Math.cos(rad(st.hdg))/111320;st.lon+=d*Math.sin(rad(st.hdg))/(111320*Math.cos(rad(st.lat)));
+      st.alt+=d*0.02*Math.sin(simT/60000);
+      simT+=dtStep*1000;segT+=dtStep;
+      if(segT>=dur){seg++;segT=0;if(seg>=plan.length){SIM.on=false;endTrip();toast("Simulazione completata",3000);status();return;}}
+      // motion sample every 0.02 s
+      const aLat=st.v*rad(yawRate); // to the right when yawRate>0 (clockwise)
+      SIM.truth={lon:aLon/G,lat:aLat/G};
+      const veh=[aLon+ (Math.random()-0.5)*0.4, -aLat+(Math.random()-0.5)*0.4, (Math.random()-0.5)*0.6]; // y=left
+      const gph=toPhone([0,0,G]), lin=toPhone(veh);
+      processMotion(simT,{x:lin[0]+gph[0],y:lin[1]+gph[1],z:lin[2]+gph[2]},{x:lin[0],y:lin[1],z:lin[2]});
+      if(simT-lastFixT>=1000){lastFixT=simT;
+        processFix({t:simT,lat:st.lat+(Math.random()-0.5)*0.00002,lon:st.lon+(Math.random()-0.5)*0.00002,alt:st.alt+(Math.random()-0.5)*2,acc:5,v:Math.max(0,st.v+(Math.random()-0.5)*0.2),hdg:st.v>1?st.hdg:null});}
+    }
+    setTimeout(tick,100);
+  }
+  tick();
+}
+
+/* ================= rendering helpers ================= */
+function cv(c,h){const r=window.devicePixelRatio||1;const w=c.clientWidth;h=h||c.height/(c._r||1);c._r=r;if(c.width!==Math.round(w*r)){c.width=Math.round(w*r);c.height=Math.round(h*r);}
+  const x=c.getContext("2d");x.setTransform(r,0,0,r,0,0);x.clearRect(0,0,w,h);return [x,w,h];}
+function initCanvas(c){c._h=c._h||parseInt(c.getAttribute("height"))||150;c.style.height=c._h+"px";return c._h;}
+function lineChart(c,series,opt={}){
+  const h=initCanvas(c);const [x,w]=cv(c,h);
+  let mn=opt.min??Infinity,mx=opt.max??-Infinity;
+  if(opt.min==null||opt.max==null)series.forEach(s=>s.data.forEach(v=>{if(v!=null&&isFinite(v)){if(opt.min==null)mn=Math.min(mn,v);if(opt.max==null)mx=Math.max(mx,v);}}));
+  if(opt.sym){const m=Math.max(Math.abs(mn),Math.abs(mx),opt.symMin||0);mn=-m;mx=m;}
+  if(!isFinite(mn)||!isFinite(mx)){x.fillStyle="#8b98a5";x.font="13px system-ui";x.fillText("nessun dato",8,20);return;}
+  if(mx-mn<1e-9){mx+=1;mn-=1;}
+  const L=34,T=6,B=opt.xlab?16:6,W=w-L-4,H=h-T-B;
+  x.font="10.5px system-ui";x.fillStyle="#8b98a5";x.strokeStyle="#25303c";x.lineWidth=1;
+  for(let i=0;i<=4;i++){const y=T+H*i/4,val=mx-(mx-mn)*i/4;x.beginPath();x.moveTo(L,y);x.lineTo(L+W,y);x.stroke();x.fillText((Math.abs(val)>=100?Math.round(val):val.toFixed(Math.abs(mx-mn)<3?2:1)),2,y+4);}
+  if(opt.sym){const y0=T+H*(mx/(mx-mn));x.strokeStyle="#3a4654";x.beginPath();x.moveTo(L,y0);x.lineTo(L+W,y0);x.stroke();}
+  if(opt.xlab){x.fillStyle="#8b98a5";x.textAlign="left";x.fillText(opt.xlab[0],L,h-3);x.textAlign="right";x.fillText(opt.xlab[1],L+W,h-3);x.textAlign="left";}
+  series.forEach(s=>{const d=s.data,n=d.length;if(n<2)return;x.strokeStyle=s.color;x.lineWidth=s.w||1.6;x.beginPath();let st=false;
+    for(let i=0;i<n;i++){const v=d[i];if(v==null||!isFinite(v)){st=false;continue;}const X=L+W*i/(n-1),Y=T+H*(1-(v-mn)/(mx-mn));st?x.lineTo(X,Y):(x.moveTo(X,Y),st=true);}x.stroke();
+    if(s.fill){x.lineTo(L+W,T+H);x.lineTo(L,T+H);x.closePath();x.fillStyle=s.fill;x.fill();}});
+}
+function down(a,n){if(a.length<=n)return a;const s=a.length/n,o=[];for(let i=0;i<n;i++)o.push(a[Math.floor(i*s)]);o.push(a[a.length-1]);return o;}
+function gg(c,pts,live){ // friction circle
+  const h=initCanvas(c);const [x,w]=cv(c,h);const cx=w/2,cy=h/2,r=Math.min(w,h)/2-14,sc=r/0.8;if(r<10)return;
+  x.strokeStyle="#25303c";x.fillStyle="#8b98a5";x.font="10px system-ui";x.lineWidth=1;
+  [0.2,0.4,0.6,0.8].forEach(g=>{x.beginPath();x.arc(cx,cy,g*sc,0,7);x.stroke();x.fillText(g.toFixed(1),cx+g*sc*0.71+2,cy-g*sc*0.71);});
+  x.beginPath();x.moveTo(cx-r,cy);x.lineTo(cx+r,cy);x.moveTo(cx,cy-r);x.lineTo(cx,cy+r);x.stroke();
+  x.fillText("acc",cx+3,cy-r+9);x.fillText("fren",cx+3,cy+r-2);x.fillText("sx",cx-r,cy-3);x.fillText("dx",cx+r-12,cy-3);
+  pts.forEach((p,i)=>{const X=cx+clamp(p.lat,-0.8,0.8)*sc,Y=cy-clamp(p.lon,-0.8,0.8)*sc;x.fillStyle=live?`rgba(88,166,255,${0.1+0.6*i/pts.length})`:"rgba(88,166,255,.35)";x.beginPath();x.arc(X,Y,live?2:1.6,0,7);x.fill();});
+  if(live&&pts.length){const p=pts[pts.length-1];const X=cx+clamp(p.lat,-0.8,0.8)*sc,Y=cy-clamp(p.lon,-0.8,0.8)*sc;x.fillStyle="#f0883e";x.beginPath();x.arc(X,Y,7,0,7);x.fill();}
+}
+function speedColor(kmh){const s=[[0,"#3fb950"],[50,"#a5d63f"],[90,"#e3b341"],[120,"#f0883e"],[140,"#f85149"]];let c=s[0][1];for(const [k,col] of s)if(kmh>=k)c=col;return c;}
+function gColor(g){g=Math.abs(g);return g<0.15?"#3fb950":g<0.3?"#e3b341":g<0.45?"#f0883e":"#f85149";}
+
+/* ================= maps ================= */
+const hasL=()=>typeof L!=="undefined";
+let liveMap=null,liveLine=null,liveDot=null;
+function ensureLiveMap(){
+  if(liveMap||!hasL())return;
+  liveMap=L.map("liveMap",{zoomControl:false,attributionControl:true}).setView([45.46,9.19],14);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(liveMap);
+  liveLine=L.polyline([],{color:"#58a6ff",weight:4}).addTo(liveMap);
+  liveDot=L.circleMarker([0,0],{radius:8,color:"#fff",weight:2,fillColor:"#f0883e",fillOpacity:1}).addTo(liveMap);
+}
+function canvasMap(el,pts,colorFn){
+  el.innerHTML="";const c=document.createElement("canvas");c.setAttribute("height",el.clientHeight||260);el.appendChild(c);
+  const h=initCanvas(c);const [x,w]=cv(c,h);if(pts.length<2){x.fillStyle="#8b98a5";x.fillText("traccia non disponibile",10,20);return;}
+  let la0=Infinity,la1=-Infinity,lo0=Infinity,lo1=-Infinity;pts.forEach(p=>{la0=Math.min(la0,p.lat);la1=Math.max(la1,p.lat);lo0=Math.min(lo0,p.lon);lo1=Math.max(lo1,p.lon);});
+  const k=Math.cos(rad((la0+la1)/2)),s=Math.min((w-20)/((lo1-lo0)*k||1e-6),(h-20)/((la1-la0)||1e-6));
+  const P=p=>[10+(p.lon-lo0)*k*s+((w-20)-(lo1-lo0)*k*s)/2,10+(la1-p.lat)*s+((h-20)-(la1-la0)*s)/2];
+  x.lineWidth=3;for(let i=1;i<pts.length;i++){const a=P(pts[i-1]),b=P(pts[i]);x.strokeStyle=colorFn(pts[i]);x.beginPath();x.moveTo(...a);x.lineTo(...b);x.stroke();}
+  x.fillStyle="#fff";[pts[0],pts[pts.length-1]].forEach(p=>{const [X,Y]=P(p);x.beginPath();x.arc(X,Y,4,0,7);x.fill();});
+  x.fillStyle="#8b98a5";x.font="10px system-ui";x.fillText("mappa offline (senza sfondo)",8,h-6);
+}
+let tripMap=null;
+function drawTripMap(el,tr,mode){
+  const pts=tr.pts;const colorFn=mode==="g"?p=>gColor(Math.hypot(p.gLon||0,p.gLat||0)):p=>speedColor(p.v*3.6);
+  if(!hasL()||!navigator.onLine&&false){canvasMap(el,pts,colorFn);return;}
+  if(tripMap){tripMap.remove();tripMap=null;}
+  el.innerHTML="";
+  tripMap=L.map(el,{zoomControl:true});
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(tripMap);
+  if(pts.length<2){tripMap.setView([45.46,9.19],5);return;}
+  // segment colouring: group consecutive points with same colour
+  let seg=[pts[0]],col=colorFn(pts[0]);
+  const flush=()=>{if(seg.length>1)L.polyline(seg.map(p=>[p.lat,p.lon]),{color:col,weight:5,opacity:.9}).addTo(tripMap);};
+  for(let i=1;i<pts.length;i++){const c=colorFn(pts[i]);seg.push(pts[i]);if(c!==col){flush();seg=[pts[i]];col=c;}}flush();
+  const icon=(t,c)=>L.circleMarker([0,0],{radius:6,color:"#fff",weight:2,fillColor:c,fillOpacity:1});
+  icon("S","#3fb950").setLatLng([pts[0].lat,pts[0].lon]).addTo(tripMap).bindPopup("Partenza");
+  icon("E","#f85149").setLatLng([pts.at(-1).lat,pts.at(-1).lon]).addTo(tripMap).bindPopup("Arrivo");
+  const lab={brake:"Frenata",acc:"Accelerazione",corner:"Curva"};
+  tr.events.forEach(e=>{if(e.lat==null)return;L.circleMarker([e.lat,e.lon],{radius:e.sev==2?8:6,color:e.type==="brake"?"#f85149":e.type==="acc"?"#e3b341":"#d2a8ff",weight:3,fillOpacity:.2})
+    .addTo(tripMap).bindPopup(`${lab[e.type]} ${e.peak} g${e.dir?" ("+e.dir+")":""} · ${e.v} km/h`);});
+  tripMap.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])),{padding:[15,15]});
+}
+
+/* ================= LIVE render ================= */
+let lastLiveRender=0;
+function renderLive(){
+  const f=lastFix;
+  if(f){const kmh=f.v*3.6;$("lSpeed").innerHTML=`${Math.round(kmh)}<small> km/h</small>`;$("lSpeed").style.color=kmh>S.limit?"var(--r)":"";
+    $("lSub").innerHTML=`${f.alt!=null?Math.round(f.alt)+" m slm · ":""}±${Math.round(f.acc||0)} m · ${new Date(f.t).toLocaleTimeString()}`;
+    $("lHdg").innerHTML=f.hdg!=null?`${Math.round(f.hdg)}° <small>${card8(f.hdg)}</small>`:"–";
+    ensureLiveMap();
+    if(liveMap){liveDot.setLatLng([f.lat,f.lon]);if(trip)liveLine.setLatLngs(trip.pts.map(p=>[p.lat,p.lon]));if(!liveMap._userMoved)liveMap.setView([f.lat,f.lon],Math.max(liveMap.getZoom(),14),{animate:false});}
+  }
+  if(trip){const st=trip.st,c=computeScores(trip),el=(trip.end-trip.start)/1000;
+    $("tDist").innerHTML=`${fmtKm(st.dist)} <small>km</small>`;$("tTime").textContent=fmtDur(el);
+    $("tAvg").innerHTML=st.moving>10?`${Math.round(st.dist/st.moving*3.6)} <small>km/h</small>`:"–";
+    $("tScore").innerHTML=`<span class="${scoreCls(c.score)}" style="color:var(--${c.score>=85?"b":c.score>=65?"y":"r"})">${c.score}</span><small>/100</small>`;
+    $("tEco").innerHTML=`<span style="color:var(--${c.eco>=85?"b":c.eco>=65?"y":"r"})">${c.eco}</span><small>/100</small>`;
+    $("tFuel").innerHTML=c.per100!=null?`${c.per100.toFixed(1)} <small>${c.unit}/100</small>`:`${c.qty.toFixed(2)} <small>${c.unit}</small>`;
+    const cnt={brake:0,acc:0,corner:0};trip.events.forEach(e=>cnt[e.type]++);
+    $("tEvents").innerHTML=`<span class="pill ${cnt.brake?"bad":"ok"}">Frenate brusche ${cnt.brake}</span><span class="pill ${cnt.acc?"warn":"ok"}">Accelerazioni ${cnt.acc}</span><span class="pill ${cnt.corner?"warn":"ok"}">Curve veloci ${cnt.corner}</span><span class="pill">Soste ${st.stops}</span><span class="pill">Max ${Math.round(st.maxV*3.6)} km/h</span>`;
+  }else{["tDist","tTime","tAvg","tScore","tEco","tFuel"].forEach(i=>$(i).textContent="–");$("tEvents").innerHTML='<span class="mut">Nessun viaggio in corso. Con l\'avvio automatico parte da solo sopra i 12 km/h.</span>';}
+}
+function renderFast(){
+  if(document.hidden||!$("v-live").classList.contains("on"))return;
+  $("lLong").innerHTML=`<span style="color:var(--${fused.lon<-S.brake?"r":fused.lon>S.acc?"y":"tx"})">${fused.lon>=0?"+":""}${fused.lon.toFixed(2)}</span><small> g</small>`;
+  $("lLat").innerHTML=`${Math.abs(fused.lat).toFixed(2)}<small> g ${fused.lat>0.03?"dx":fused.lat<-0.03?"sx":""}</small>`;
+  gg($("gball"),live60.slice(-80).map(p=>({lon:p.lon,lat:p.lat})),true);
+  const d=down(live60,240);lineChart($("cLiveG"),[{data:d.map(p=>p.lon),color:"#58a6ff"},{data:d.map(p=>p.lat),color:"#f0883e"}],{sym:true,symMin:0.3});
+}
+setInterval(renderFast,150);
+setInterval(()=>{if(trip)renderLive();},1000);
+
+/* ================= TRIP view ================= */
+let tripsCache=[];
+async function refreshLists(){tripsCache=await allTrips();fillTripSel();renderHist();storageInfo();}
+function tripLabel(t){const d=new Date(t.start);return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · ${fmtKm(t.st.dist)} km${t.active?" (in corso)":""}`;}
+function fillTripSel(){const sel=$("tripSel"),cur=sel.value;sel.innerHTML="";
+  if(trip){const o=document.createElement("option");o.value="__live";o.textContent="▶︎ Viaggio in corso";sel.appendChild(o);}
+  tripsCache.filter(t=>!t.active||!trip||t.id!==trip.id).forEach(t=>{const o=document.createElement("option");o.value=t.id;o.textContent=tripLabel(t);sel.appendChild(o);});
+  if(!sel.options.length){const o=document.createElement("option");o.textContent="Nessun viaggio registrato";o.value="";sel.appendChild(o);}
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;}
+$("tripSel").onchange=()=>renderTrip();
+function getSelTrip(){const v=$("tripSel").value;if(v==="__live")return trip;return tripsCache.find(t=>t.id===v);}
+let tripMapMode="speed";
+function renderTrip(){
+  const tr=getSelTrip(),body=$("tripBody");
+  if(!tr){body.innerHTML='<div class="card mut">Nessun viaggio. Attiva i sensori e guida, oppure prova "Simula un viaggio" nelle impostazioni.</div>';return;}
+  const st=tr.st,c=tr===trip||!tr.calc?computeScores(tr):tr.calc,dur=(tr.end-tr.start)/1000;
+  const cnt={brake:[0,0],acc:[0,0],corner:[0,0]};tr.events.forEach(e=>cnt[e.type][e.sev-1]++);
+  const lab={brake:"Frenata brusca",acc:"Accelerazione brusca",corner:"Curva veloce"};
+  const verdict=s=>s>=90?"Eccellente":s>=80?"Molto buona":s>=65?"Discreta":s>=50?"Migliorabile":"Aggressiva";
+  const tips=[];
+  if(cnt.brake[0]+cnt.brake[1]>0)tips.push("Anticipa le frenate: guardare più lontano riduce le frenate brusche e il consumo.");
+  if(cnt.acc[0]+cnt.acc[1]>0)tips.push("Accelera in modo più progressivo: oltre 0,25 g sprechi carburante.");
+  if(cnt.corner[0]+cnt.corner[1]>0)tips.push("Rallenta prima delle curve: i g laterali alti stressano gomme e passeggeri.");
+  if(c.overShare>0.02)tips.push(`Sei stato oltre ${S.limit} km/h per il ${Math.round(c.overShare*100)}% del tempo in movimento.`);
+  if(c.idleShare>0.2)tips.push(`Motore al minimo per il ${Math.round(c.idleShare*100)}% del tempo: spegni nelle soste lunghe.`);
+  if(c.highRatio>0.1)tips.push("A velocità alte la resistenza dell'aria pesa molto: 10 km/h in meno in autostrada fanno risparmiare circa il 10%.");
+  if(!tips.length)tips.push("Guida fluida e regolare: continua così.");
+  const pts=tr.pts,sp=down(pts,500);
+  const t0=new Date(tr.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),t1=new Date(tr.end).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  body.innerHTML=`
+  <div class="card"><div class="grid">
+    <div><div class="k">Punteggio guida</div><div class="score" style="color:var(--${c.score>=85?"b":c.score>=65?"y":"r"})">${c.score}<small class="mut"> /100</small></div><div class="mut">${verdict(c.score)}</div></div>
+    <div><div class="k">Punteggio eco</div><div class="score" style="color:var(--${c.eco>=85?"b":c.eco>=65?"y":"r"})">${c.eco}<small class="mut"> /100</small></div><div class="mut">${verdict(c.eco)}</div></div>
+  </div></div>
+  <div class="card"><h2>Percorso</h2><div class="row" style="margin-bottom:6px"><button id="mSpeed">Colore: velocità</button><button id="mG">Colore: g</button></div>
+    <div class="map" id="tripMap" style="height:300px"></div>
+    <div class="leg" style="margin-top:4px">${tripMapMode==="g"?'<span><b style="background:#3fb950"></b>&lt;0,15 g</span><span><b style="background:#e3b341"></b>0,3</span><span><b style="background:#f0883e"></b>0,45</span><span><b style="background:#f85149"></b>oltre</span>':'<span><b style="background:#3fb950"></b>&lt;50</span><span><b style="background:#a5d63f"></b>50–90</span><span><b style="background:#e3b341"></b>90–120</span><span><b style="background:#f0883e"></b>120–140</span><span><b style="background:#f85149"></b>&gt;140 km/h</span>'}</div></div>
+  <div class="card"><h2>Statistiche</h2><table>
+    <tr><td>Orario</td><td>${t0} → ${t1}</td></tr>
+    <tr><td>Distanza</td><td>${fmtKm(st.dist)} km</td></tr>
+    <tr><td>Durata totale · in movimento · ferma</td><td>${fmtDur(dur)} · ${fmtDur(st.moving)} · ${fmtDur(st.idle)}</td></tr>
+    <tr><td>Velocità media (in movimento)</td><td>${st.moving>0?Math.round(st.dist/st.moving*3.6):"–"} km/h</td></tr>
+    <tr><td>Velocità massima</td><td>${Math.round(st.maxV*3.6)} km/h</td></tr>
+    <tr><td>Soste · curve</td><td>${st.stops} · ${st.corners}</td></tr>
+    <tr><td>Dislivello</td><td>+${Math.round(st.gain)} m / −${Math.round(st.loss)} m</td></tr>
+    <tr><td>Max g laterale · frenata · accelerazione</td><td>${st.maxLat.toFixed(2)} · ${st.maxBrake.toFixed(2)} · ${st.maxAcc.toFixed(2)} g</td></tr>
+    <tr><td>Miglior 0–50 · 0–100 km/h</td><td>${st.best050?st.best050+" s":"–"} · ${st.best0100?st.best0100+" s":"–"}</td></tr>
+    <tr><td>Fluidità (jerk RMS)</td><td>${c.jerk} g/s</td></tr>
+    <tr><td>Tempo oltre ${S.limit} km/h</td><td>${fmtDur(st.overT)}</td></tr>
+  </table></div>
+  <div class="card"><h2>Consumo stimato (${{petrol:"benzina",diesel:"diesel",lpg:"GPL",ev:"elettrica"}[S.fuel]})</h2><table>
+    <tr><td>Consumo</td><td>${c.per100!=null?c.per100.toFixed(1)+" "+c.unit+"/100 km · "+(c.unit==="L"&&c.per100>0?(100/c.per100).toFixed(1)+" km/L":""):"–"}</td></tr>
+    <tr><td>Totale</td><td>${c.qty.toFixed(2)} ${c.unit} · ${c.cost.toFixed(2)} € · ${c.co2.toFixed(1)} kg CO₂</td></tr>
+    <tr><td>Energia alle ruote</td><td>${(st.ePos/3.6e6).toFixed(2)} kWh</td></tr>
+    <tr><td>Dissipata in frenata</td><td>${Math.round(c.brakeRatio*100)}%</td></tr>
+    <tr><td>Spesa in accelerazioni brusche</td><td>${Math.round(c.aggrRatio*100)}%</td></tr>
+    <tr><td>Extra aerodinamico sopra 110 km/h</td><td>${Math.round(c.highRatio*100)}%</td></tr>
+    <tr><td>Tempo al minimo</td><td>${Math.round(c.idleShare*100)}%</td></tr>
+  </table><div class="mut" style="margin-top:6px">Stima fisica dai parametri in Impostazioni, non letta dall'auto.</div></div>
+  <div class="card"><h2>Consigli</h2>${tips.map(t=>`<div style="padding:4px 0">• ${t}</div>`).join("")}</div>
+  <div class="card"><h2>Velocità (km/h) e altitudine (m)</h2><canvas id="cTS" height="150"></canvas><canvas id="cTA" height="90" style="margin-top:4px"></canvas>
+    <div class="leg"><span><b style="background:var(--a)"></b>velocità</span><span><b style="background:var(--c)"></b>altitudine</span></div></div>
+  <div class="card"><h2>g longitudinale e laterale</h2><canvas id="cTG" height="150"></canvas>
+    <div class="leg"><span><b style="background:var(--a)"></b>long. (+ acc / − fren)</span><span><b style="background:var(--c)"></b>lat. (+ dx / − sx)</span></div></div>
+  <div class="card"><h2>Diagramma g-g (cerchio d'aderenza)</h2><canvas id="cGG" height="260"></canvas></div>
+  <div class="card"><h2>Tempo per fascia di velocità</h2><canvas id="cHist" height="150"></canvas></div>
+  <div class="card"><h2>Eventi (${tr.events.length})</h2>
+    <div class="row" style="margin-bottom:6px">${Object.keys(cnt).map(k=>`<span class="pill">${lab[k]}: ${cnt[k][0]} + ${cnt[k][1]} forti</span>`).join("")}</div>
+    ${tr.events.slice().reverse().map(e=>`<div class="ev"><span>${new Date(e.t).toLocaleTimeString()} · ${lab[e.type]}${e.dir?" "+e.dir:""}${e.sev==2?" ‼️":""}</span><span>${e.peak} g · ${e.v??"–"} km/h</span></div>`).join("")||'<div class="mut">Nessun evento: guida pulita.</div>'}</div>
+  <div class="card"><h2>Esporta</h2><div class="row"><button id="xGPX">GPX</button><button id="xCSV">CSV</button><button id="xJSON">JSON</button>${tr===trip?"":'<button class="dan" id="xDel">Elimina viaggio</button>'}</div></div>`;
+  drawTripMap($("tripMap"),tr,tripMapMode);
+  $("mSpeed").onclick=()=>{tripMapMode="speed";renderTrip();};$("mG").onclick=()=>{tripMapMode="g";renderTrip();};
+  const xl=[t0,t1];
+  lineChart($("cTS"),[{data:sp.map(p=>p.v*3.6),color:"#58a6ff",fill:"rgba(88,166,255,.12)"}],{min:0,xlab:xl});
+  lineChart($("cTA"),[{data:sp.map(p=>p.alt),color:"#f0883e"}],{});
+  lineChart($("cTG"),[{data:sp.map(p=>p.gLon),color:"#58a6ff",w:1.2},{data:sp.map(p=>p.gLat),color:"#f0883e",w:1.2}],{sym:true,symMin:0.3,xlab:xl});
+  gg($("cGG"),down(pts,1500).map(p=>({lon:p.gLon||0,lat:p.gLat||0})),false);
+  histChart($("cHist"),st.hist);
+  $("xGPX").onclick=()=>download(`viaggio_${dayKey(tr.start)}.gpx`,toGPX(tr),"application/gpx+xml");
+  $("xCSV").onclick=()=>download(`viaggio_${dayKey(tr.start)}.csv`,toCSV(tr),"text/csv");
+  $("xJSON").onclick=()=>download(`viaggio_${dayKey(tr.start)}.json`,JSON.stringify(pack(tr)),"application/json");
+  const del=$("xDel");if(del)del.onclick=async()=>{if(del.dataset.c){await delTrip(tr.id);await refreshLists();renderTrip();toast("Viaggio eliminato");}else{del.dataset.c=1;del.textContent="Tocca di nuovo per confermare";}};
+}
+function histChart(c,hist){const h=initCanvas(c);const [x,w]=cv(c,h);const mx=Math.max(...hist,1),n=hist.length,bw=(w-10)/n;
+  hist.forEach((v,i)=>{const bh=(h-30)*v/mx;x.fillStyle=speedColor(i*10+5);x.fillRect(5+i*bw+1,h-16-bh,bw-2,bh);
+    if(v>0){x.fillStyle="#e6edf3";x.font="9.5px system-ui";x.textAlign="center";x.fillText(Math.round(v/60)+"'",5+i*bw+bw/2,h-19-bh);}
+    x.fillStyle="#8b98a5";x.font="9.5px system-ui";x.textAlign="center";if(i%2==0)x.fillText(i*10,5+i*bw+bw/2,h-3);});x.textAlign="left";}
+function toGPX(tr){return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Telemetria Auto" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Viaggio ${new Date(tr.start).toLocaleString()}</name><trkseg>\n`+
+  tr.pts.map(p=>`<trkpt lat="${p.lat}" lon="${p.lon}">${p.alt!=null?`<ele>${p.alt}</ele>`:""}<time>${new Date(p.t).toISOString()}</time></trkpt>`).join("\n")+`\n</trkseg></trk></gpx>`;}
+function toCSV(tr){return "time,lat,lon,alt_m,speed_kmh,heading,accuracy_m,g_long,g_lat\n"+tr.pts.map(p=>[new Date(p.t).toISOString(),p.lat,p.lon,p.alt??"",(p.v*3.6).toFixed(1),p.hdg??"",p.acc??"",p.gLon??"",p.gLat??""].join(",")).join("\n");}
+
+/* ================= HISTORY ================= */
+function renderHist(){
+  const done=tripsCache.filter(t=>!t.active);
+  const km=done.reduce((s,t)=>s+t.st.dist,0)/1000, time=done.reduce((s,t)=>s+t.st.moving,0);
+  const wavg=k=>{const w=done.reduce((s,t)=>s+t.st.dist,0);return w?Math.round(done.reduce((s,t)=>s+(t[k]||0)*t.st.dist,0)/w):"–";};
+  const fuel=done.reduce((s,t)=>s+(t.calc?t.calc.qty:0),0), cost=done.reduce((s,t)=>s+(t.calc?t.calc.cost:0),0);
+  const best=done.reduce((b,t)=>t.st.best0100&&(!b||t.st.best0100<b)?t.st.best0100:b,null);
+  const maxLat=done.reduce((m,t)=>Math.max(m,t.st.maxLat),0), maxV=done.reduce((m,t)=>Math.max(m,t.st.maxV),0);
+  $("totals").innerHTML=[["Viaggi",done.length],["Km totali",km.toFixed(1)],["Tempo alla guida",fmtDur(time)],["Punteggio medio",wavg("score")],["Eco medio",wavg("eco")],["Carburante stimato",fuel.toFixed(1)+" "+FUEL[S.fuel].u],
+    ["Spesa stimata",cost.toFixed(0)+" €"],["Velocità max",Math.round(maxV*3.6)+" km/h"],["Record 0–100",best?best+" s":"–"],["Max g laterale",maxLat.toFixed(2)]]
+    .map(([k,v])=>`<div><div class="k">${k}</div><div class="v" style="font-size:18px">${v}</div></div>`).join("");
+  // days
+  const days={};done.forEach(t=>{const k=dayKey(t.start);(days[k]=days[k]||[]).push(t);});
+  const keys=[];for(let i=29;i>=0;i--)keys.push(dayKey(Date.now()-i*86400000));
+  const kmD=keys.map(k=>(days[k]||[]).reduce((s,t)=>s+t.st.dist,0)/1000);
+  const sc=(k,f)=>{const a=days[k]||[];const w=a.reduce((s,t)=>s+t.st.dist,0);return w?a.reduce((s,t)=>s+(t[f]||0)*t.st.dist,0)/w:null;};
+  dayChart($("cDays"),keys,kmD,keys.map(k=>sc(k,"score")),keys.map(k=>sc(k,"eco")));
+  const dk=Object.keys(days).sort().reverse();
+  $("dayList").innerHTML=dk.map(k=>{const a=days[k],d=a.reduce((s,t)=>s+t.st.dist,0),mv=a.reduce((s,t)=>s+t.st.moving,0);
+    return `<div style="margin:6px 0 2px;font-weight:600">${new Date(k+"T12:00").toLocaleDateString([], {weekday:"long",day:"numeric",month:"long"})} · ${fmtKm(d)} km · ${fmtDur(mv)} · guida ${Math.round(sc(k,"score"))} · eco ${Math.round(sc(k,"eco"))}</div>`+
+    a.map(t=>`<div class="trip" data-id="${t.id}"><span>${new Date(t.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}–${new Date(t.end).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · ${fmtKm(t.st.dist)} km · max ${Math.round(t.st.maxV*3.6)} km/h</span><span><span class="pill ${scoreCls(t.score)}">${t.score}</span><span class="pill ${scoreCls(t.eco)}">eco ${t.eco}</span></span></div>`).join("");}).join("")||'<div class="mut">Ancora nessun viaggio salvato.</div>';
+  document.querySelectorAll(".trip").forEach(el=>el.onclick=()=>{$("tripSel").value=el.dataset.id;show("trip");});
+}
+function dayChart(c,keys,km,score,eco){const h=initCanvas(c);const [x,w]=cv(c,h);const n=keys.length,L=28,Rr=24,W=w-L-Rr,H=h-22,bw=W/n,mx=Math.max(...km,1);
+  x.font="10px system-ui";x.fillStyle="#8b98a5";x.fillText(Math.round(mx)+" km",0,10);x.textAlign="right";x.fillText("100",w,10);x.fillText("0",w,H+4);x.textAlign="left";
+  km.forEach((v,i)=>{const bh=H*v/mx;x.fillStyle="#58a6ff";x.fillRect(L+i*bw+1,6+H-bh,Math.max(1,bw-2),bh);});
+  [[score,"#3fb950"],[eco,"#e3b341"]].forEach(([s,col])=>{x.strokeStyle=col;x.fillStyle=col;x.lineWidth=1.6;let pr=null;s.forEach((v,i)=>{if(v==null)return;const X=L+i*bw+bw/2,Y=6+H*(1-v/100);if(pr){x.beginPath();x.moveTo(...pr);x.lineTo(X,Y);x.stroke();}x.beginPath();x.arc(X,Y,2.4,0,7);x.fill();pr=[X,Y];});});
+  x.fillStyle="#8b98a5";[0,Math.floor(n/2),n-1].forEach(i=>{const d=new Date(keys[i]+"T12:00");x.textAlign=i==0?"left":i==n-1?"right":"center";x.fillText(`${d.getDate()}/${d.getMonth()+1}`,i==0?L:i==n-1?w-Rr:L+i*bw,h-3);});x.textAlign="left";}
+
+/* ================= settings actions ================= */
+$("bBackup").onclick=async()=>{const all=await allTrips();download(`telemetria_backup_${dayKey(Date.now())}.json`,JSON.stringify({v:1,settings:S,trips:all}),"application/json");};
+$("fImport").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());let n=0;for(const t of (j.trips||[])){if(t.id&&t.pts){t.active=false;await putTrip(t);n++;}}
+  if(j.settings){Object.assign(S,j.settings);try{localStorage.setItem("autoSettings",JSON.stringify(S));}catch(e){}}await refreshLists();toast(`Importati ${n} viaggi`);}catch(err){toast("File non valido");}};
+$("bWipe").onclick=async()=>{const b=$("bWipe");if(!b.dataset.c){b.dataset.c=1;b.textContent="Tocca di nuovo: cancella TUTTI i viaggi";setTimeout(()=>{delete b.dataset.c;b.textContent="Cancella tutto";},4000);return;}
+  for(const t of await allTrips())await delTrip(t.id);await refreshLists();toast("Tutti i dati cancellati");delete b.dataset.c;b.textContent="Cancella tutto";};
+async function storageInfo(){let s=`${tripsCache.length} viaggi salvati`;try{const e=await navigator.storage.estimate();s+=` · ${(e.usage/1e6).toFixed(1)} MB usati`;}catch(e){}$("storageInfo").textContent=s;}
+
+/* ================= navigation & boot ================= */
+function show(v){document.querySelectorAll(".view").forEach(s=>s.classList.toggle("on",s.id==="v-"+v));document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  scrollTo(0,0);if(v==="trip"){fillTripSel();renderTrip();}if(v==="hist")renderHist();if(v==="live"&&liveMap)setTimeout(()=>liveMap.invalidateSize(),50);}
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>show(b.dataset.v));
+addEventListener("resize",()=>{if($("v-trip").classList.contains("on"))renderTrip();});
+
+(async()=>{
+  try{db=await idb();}catch(e){$("banners").innerHTML='<div class="banner">Archivio non disponibile in questo browser: i viaggi non verranno salvati.</div>';}
+  // recover an interrupted trip
+  const all=await allTrips();
+  const act=all.find(t=>t.active);
+  if(act){const ago=Date.now()-act.end;
+    if(ago<15*60000){trip=Object.assign(newTrip(act.start),act);$("bTrip").textContent="Termina viaggio";$("bTrip").className="dan";
+      $("banners").innerHTML=`<div class="banner">Ho ripreso il viaggio interrotto delle ${new Date(act.start).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}. Premi "Attiva sensori" per continuare.</div>`;}
+    else{act.active=false;finalize(act);if(act.st.dist>=200)await putTrip(act);else await delTrip(act.id);}}
+  await refreshLists();renderLive();status();
+  if(!hasL())$("liveMap").innerHTML='<div class="mut" style="padding:10px">Mappa non caricata (serve internet la prima volta).</div>';
+  if(location.hash==="#demo"){SIM.speed=40;runSim();}
+})();
+</script>
+</body>
+</html>
